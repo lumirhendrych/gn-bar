@@ -1,18 +1,17 @@
 // GN Bar — rychlá kasa pro barmany: položky → hotově / kartou (PayPhone od KB SmartPay)
 'use strict';
 
-const VYCHOZI_CENIK = `Drinky 0,3 l; Křídla; 110
-Drinky 0,3 l; Vodka džus; 110
-Drinky 0,3 l; Vodka Sprite; 110
-Drinky 0,3 l; Morgan a cola; 110
-Drinky 0,3 l; Twister; 110
-Drinky 0,3 l; Gin tonic; 130
+const VYCHOZI_CENIK = `Drinky 0,3 l; Křídla; 120
+Drinky 0,3 l; Vodka džus; 120
+Drinky 0,3 l; Vodka Sprite; 120
+Drinky 0,3 l; Morgan a cola; 120
+Drinky 0,3 l; Gin tonic; 140
 Panáky; Nicolaus vodka; 60
 Panáky; Božkov; 60
-Panáky; Republica; 70
+Panáky; Republica; 80
 Panáky; Beefeater gin; 80
 Panáky; Jägermeister; 80
-Panáky; Jack Honey; 90
+Panáky; Jack Honey; 80
 Panáky; Bumbu; 150
 Pivo a nealko; Samson 10°; 50
 Pivo a nealko; Kofola; 50
