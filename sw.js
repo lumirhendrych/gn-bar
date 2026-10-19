@@ -1,5 +1,5 @@
 // offline cache — při změně appky zvednout verzi
-const V = 'gnbar-2';
+const V = 'gnbar-3';
 const FILES = ['./', 'index.html', 'app.css', 'app.js', 'manifest.webmanifest', 'icon-180.png', 'icon-192.png', 'icon-512.png'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(V).then(c => c.addAll(FILES))); self.skipWaiting(); });
 self.addEventListener('activate', e => {

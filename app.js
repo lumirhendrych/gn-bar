@@ -26,16 +26,16 @@ Kýbl 5 l; Kýbl Morgan; 1200`;
 const ANDROID_PACKAGE = 'eu.softpos.softposwrapper.kb';
 const IOS_ZKRATKA = 'PayPhone';
 
-const K = { nast: 'gnbar.nastaveni', prodeje: 'gnbar.prodeje' };
+const K = { nast: 'gnbar.nastaveni', prodeje: 'gnbar.prodeje', cekajici: 'gnbar.cekajici' };
 const $ = s => document.querySelector(s);
 const kc = n => n.toLocaleString('cs-CZ') + ' Kč';
 
-let nast = Object.assign({ barman: '', rezim: odhadRezim(), vlastni: '', cenik: VYCHOZI_CENIK },
+let nast = Object.assign({ barman: '', rezim: odhadRezim(), vlastni: '', sumupKlic: '', sumupAppId: '', cenik: VYCHOZI_CENIK },
   JSON.parse(localStorage.getItem(K.nast) || '{}'));
 let prodeje = JSON.parse(localStorage.getItem(K.prodeje) || '[]');
 let ucet = {};            // název → počet
 let polozky = [];         // [{kat, n, p}]
-let platbaKartou = null;  // rozpracovaná platba v PayPhone
+let platbaKartou = null;  // rozpracovaná platba kartou
 
 function odhadRezim() { return /iPhone|iPad/.test(navigator.userAgent) ? 'ios' : 'android'; }
 
@@ -82,8 +82,8 @@ function vykresliUcet() {
 
 function prekresli() { vykresliMenu(); vykresliUcet(); }
 
-function zaznamenej(zpusob, castka, dal) {
-  prodeje.push({ t: Date.now(), z: zpusob, c: castka, dal: dal || null,
+function zaznamenej(zpusob, castka, dal, tx) {
+  prodeje.push({ t: Date.now(), z: zpusob, c: castka, dal: dal || null, tx: tx || null,
     o: Object.entries(ucet).map(([n, q]) => ({ n, q, p: cenaPolozky(n) })), b: nast.barman });
   localStorage.setItem(K.prodeje, JSON.stringify(prodeje));
   ucet = {}; prekresli(); toast((zpusob === 'karta' ? 'Kartou ' : 'Hotově ') + kc(castka) + ' ✓');
@@ -116,6 +116,18 @@ function odkazPayPhone(castka) {
              `package=${ANDROID_PACKAGE};end`;
     case 'ios':
       return `shortcuts://run-shortcut?name=${encodeURIComponent(IOS_ZKRATKA)}&input=text&text=${castka}`;
+    case 'sumup': {
+      // SumUp Payment API pro mobilní web (github.com/sumup/sumup-android-api, sumup-ios-url-scheme);
+      // SumUp dostane jen částku a ID platby, položky zůstávají v telefonu
+      const zpet = location.origin + location.pathname + '?sumup=1';
+      const q = new URLSearchParams({
+        'affiliate-key': nast.sumupKlic, 'app-id': nast.sumupAppId,
+        total: castka.toFixed(2), amount: castka.toFixed(2), currency: 'CZK', title: 'GN Bar',
+        'foreign-tx-id': platbaKartou ? platbaKartou.id : 'test-' + Date.now(),
+        'skip-screen-success': 'true', callback: zpet, callbacksuccess: zpet, callbackfail: zpet
+      });
+      return 'sumupmerchant://pay/1.0?' + q.toString().replace(/\+/g, '%20');
+    }
     case 'vlastni':
       return nast.vlastni.replaceAll('{castka}', castka).replaceAll('{haleru}', castka * 100);
     default: return null;
@@ -129,17 +141,42 @@ function otevriPayPhone(castka) {
 
 $('#btnKartou').onclick = async () => {
   const s = soucet();
-  platbaKartou = { castka: s };
+  platbaKartou = { castka: s, id: 'gn-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6), ucet: { ...ucet } };
+  // stránka se po návratu ze SumUpu načte znovu → rozpracovaný účet si uložit
+  localStorage.setItem(K.cekajici, JSON.stringify(platbaKartou));
   $('#kCastka').textContent = kc(s);
   $('#kSchranka').textContent = '';
+  $('#kNadpis').textContent = nast.rezim === 'sumup' ? 'Platba v SumUpu' : 'Zadej v PayPhone';
+  if (nast.rezim === 'sumup' && !nast.sumupKlic) return toast('Chybí SumUp klíč v nastavení ⚙︎', true);
   try { await navigator.clipboard.writeText(String(s)); $('#kSchranka').textContent = `Částka ${s} je ve schránce`; } catch (e) {}
   $('#kOtevrit').style.display = nast.rezim === 'nic' ? 'none' : '';
   $('#dlgKarta').classList.add('on');
   otevriPayPhone(s);
 };
 $('#kOtevrit').onclick = () => platbaKartou && otevriPayPhone(platbaKartou.castka);
-$('#kAno').onclick = () => { const c = platbaKartou.castka; platbaKartou = null; zavri(); zaznamenej('karta', c); };
-$('#kNe').onclick = () => { platbaKartou = null; zavri(); toast('Platba neprošla — účet zůstal otevřený', true); };
+$('#kAno').onclick = () => { const c = platbaKartou.castka; konecKarty(); zaznamenej('karta', c); };
+$('#kNe').onclick = () => { konecKarty(); toast('Platba neprošla — účet zůstal otevřený', true); };
+function konecKarty() { platbaKartou = null; localStorage.removeItem(K.cekajici); zavri(); }
+
+// návrat ze SumUpu: ?sumup=1&smp-status=success|failed&smp-tx-code=…&foreign-tx-id=…
+function navratZeSumUp() {
+  const q = new URLSearchParams(location.search);
+  const cek = JSON.parse(localStorage.getItem(K.cekajici) || 'null');
+  if (!q.has('sumup')) {
+    if (cek) {  // nedokončená platba: ukázat dialog, ale SumUp znovu neotvírat
+      ucet = cek.ucet; platbaKartou = cek; prekresli();
+      $('#kCastka').textContent = kc(cek.castka); $('#kOtazka').textContent = 'Prošla platba ' + kc(cek.castka) + '?';
+      $('#dlgKarta').classList.add('on');
+    }
+    return;
+  }
+  history.replaceState(null, '', location.pathname);
+  if (!cek || (q.get('foreign-tx-id') && q.get('foreign-tx-id') !== cek.id)) return;
+  localStorage.removeItem(K.cekajici);
+  ucet = cek.ucet;
+  if (q.get('smp-status') === 'success') zaznamenej('karta', cek.castka, null, q.get('smp-tx-code'));
+  else { prekresli(); toast('Platba kartou neprošla — účet zůstal otevřený', true); }
+}
 
 // po návratu z PayPhone zvýraznit otázku
 document.addEventListener('visibilitychange', () => {
@@ -147,7 +184,7 @@ document.addEventListener('visibilitychange', () => {
 });
 
 $('#btnZrusit').onclick = () => { if (soucet() && confirm('Zrušit rozpracovaný účet?')) { ucet = {}; prekresli(); } };
-document.querySelectorAll('[data-close]').forEach(b => b.onclick = () => { platbaKartou = null; zavri(); });
+document.querySelectorAll('[data-close]').forEach(b => b.onclick = () => konecKarty());
 function zavri() { document.querySelectorAll('.overlay').forEach(o => o.classList.remove('on')); }
 
 // ---------- přehled ----------
@@ -175,7 +212,7 @@ function vykresliPrehled() {
       <span class="s ${p.z === 'karta' ? 'k' : 'h'}">${kc(p.c)}</span>`;
     const b = document.createElement('button'); b.textContent = p.storno ? '↺' : '✕';
     b.onclick = () => {
-      if (!p.storno && !confirm(`Stornovat účet ${kc(p.c)}?` + (p.z === 'karta' ? '\nKartu je potřeba vrátit i v PayPhone.' : ''))) return;
+      if (!p.storno && !confirm(`Stornovat účet ${kc(p.c)}?` + (p.z === 'karta' ? '\nKartu je potřeba vrátit i v appce terminálu.' : ''))) return;
       p.storno = !p.storno; localStorage.setItem(K.prodeje, JSON.stringify(prodeje)); vykresliPrehled();
     };
     d.appendChild(b); u.appendChild(d);
@@ -183,9 +220,9 @@ function vykresliPrehled() {
 }
 
 $('#btnExport').onclick = async () => {
-  const rows = [['cas', 'barman', 'zpusob', 'castka', 'zakaznik_dal', 'polozky', 'storno']];
+  const rows = [['cas', 'barman', 'zpusob', 'castka', 'zakaznik_dal', 'polozky', 'storno', 'kod_transakce']];
   for (const p of prodeje) rows.push([new Date(p.t).toLocaleString('cs-CZ'), p.b, p.z, p.c, p.dal || '',
-    p.o.map(o => o.q + 'x ' + o.n).join(' | '), p.storno ? 'ano' : '']);
+    p.o.map(o => o.q + 'x ' + o.n).join(' | '), p.storno ? 'ano' : '', p.tx || '']);
   const csv = '﻿' + rows.map(r => r.map(x => `"${String(x).replaceAll('"', '""')}"`).join(';')).join('\n');
   const jmeno = `gn-bar-${(nast.barman || 'bar').replace(/\W+/g, '-')}-${new Date().toISOString().slice(0, 10)}.csv`;
   const f = new File([csv], jmeno, { type: 'text/csv' });
@@ -204,6 +241,7 @@ $('#btnUzaverka').onclick = () => {
 
 // ---------- nastavení ----------
 const HINTY = {
+  sumup: 'Kartou otevře SumUp s vyplněnou částkou; po zaplacení se SumUp sám vrátí a platba se zapíše. Na iPhonu kasu používej v Safari (ne z plochy), jinak se návrat otevře jinde.',
   android: 'Tlačítko Kartou otevře appku PayPhone a částku dá do schránky. Kdyby se místo appky otevřel Obchod Play, ťukni tam na Otevřít.',
   ios: 'Jednou v appce Zkratky vytvoř zkratku s názvem „PayPhone“ s jedinou akcí Otevřít aplikaci → PayPhone. Kasa ji pak spustí sama.',
   vlastni: 'Pro případ, že KB SmartPay dodá odkaz s částkou (deep link).',
@@ -211,16 +249,19 @@ const HINTY = {
 };
 function vyplnNastaveni() {
   $('#inBarman').value = nast.barman; $('#inRezim').value = nast.rezim;
-  $('#inVlastni').value = nast.vlastni; $('#inCenik').value = nast.cenik; rezimUI();
+  $('#inVlastni').value = nast.vlastni; $('#inCenik').value = nast.cenik;
+  $('#inSumupKlic').value = nast.sumupKlic; $('#inSumupApp').value = nast.sumupAppId; rezimUI();
 }
 function rezimUI() {
   $('#lbVlastni').style.display = $('#inRezim').value === 'vlastni' ? '' : 'none';
+  $('#boxSumup').style.display = $('#inRezim').value === 'sumup' ? '' : 'none';
   $('#hintRezim').textContent = HINTY[$('#inRezim').value];
 }
 $('#inRezim').onchange = rezimUI;
 $('#btnUlozit').onclick = () => {
   nast = { barman: $('#inBarman').value.trim(), rezim: $('#inRezim').value,
-           vlastni: $('#inVlastni').value.trim(), cenik: $('#inCenik').value.trim() };
+           vlastni: $('#inVlastni').value.trim(), cenik: $('#inCenik').value.trim(),
+           sumupKlic: $('#inSumupKlic').value.trim(), sumupAppId: $('#inSumupApp').value.trim() };
   localStorage.setItem(K.nast, JSON.stringify(nast));
   nactiCenik(); ucet = {}; prekresli(); hlavicka(); toast('Uloženo ✓');
 };
@@ -243,5 +284,16 @@ let tt; function toast(t, err) {
   el.classList.add('on'); clearTimeout(tt); tt = setTimeout(() => el.classList.remove('on'), 1800);
 }
 
+// nastavení SumUpu odkazem / QR kódem: ?klic=AFFILIATE-KEY&app=APP-ID
+(() => {
+  const q = new URLSearchParams(location.search);
+  if (!q.has('klic')) return;
+  Object.assign(nast, { rezim: 'sumup', sumupKlic: q.get('klic'), sumupAppId: q.get('app') || nast.sumupAppId });
+  localStorage.setItem(K.nast, JSON.stringify(nast));
+  history.replaceState(null, '', location.pathname);
+  setTimeout(() => toast('SumUp nastaven ✓'), 300);
+})();
+
 nactiCenik(); prekresli(); hlavicka();
+navratZeSumUp();
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});

@@ -54,6 +54,7 @@
     <h3>Otevření PayPhone</h3>
     <label>Telefon
       <select id="inRezim">
+        <option value="sumup">SumUp (částka se vyplní sama)</option>
         <option value="android">Android (otevře appku PayPhone)</option>
         <option value="ios">iPhone (přes Zkratku „PayPhone“)</option>
         <option value="vlastni">Vlastní odkaz</option>
@@ -61,8 +62,12 @@
       </select>
     </label>
     <label id="lbVlastni">Vlastní odkaz ({castka} = částka v Kč, {haleru} = v haléřích)<input id="inVlastni" placeholder="např. payphone://pay?amount={castka}"></label>
+    <div id="boxSumup">
+      <label>SumUp affiliate key<input id="inSumupKlic" placeholder="z me.sumup.com/developers" autocomplete="off"></label>
+      <label>SumUp app ID<input id="inSumupApp" placeholder="např. cz.greatnight.bar" autocomplete="off"></label>
+    </div>
     <p class="hint" id="hintRezim"></p>
-    <button class="btn" id="btnTest">Vyzkoušet otevření PayPhone</button>
+    <button class="btn" id="btnTest">Vyzkoušet otevření terminálu (1 Kč)</button>
 
     <h3>Ceník</h3>
     <p class="hint">Jedna položka na řádek: <code>Kategorie; Název; Cena</code></p>
@@ -106,10 +111,10 @@
 <!-- dialog karta -->
 <div class="overlay" id="dlgKarta">
   <div class="sheet">
-    <small>Zadej v PayPhone</small>
+    <small id="kNadpis">Zadej v PayPhone</small>
     <div class="big karta" id="kCastka"></div>
     <div class="hint" id="kSchranka"></div>
-    <button class="btn card-k xl" id="kOtevrit">Otevřít PayPhone</button>
+    <button class="btn card-k xl" id="kOtevrit">Otevřít terminál</button>
     <small id="kOtazka">Prošla platba?</small>
     <div class="row">
       <button class="btn danger" id="kNe">Neprošla</button>
