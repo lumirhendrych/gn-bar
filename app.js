@@ -13,7 +13,7 @@ Panáky; Beefeater gin; 80
 Panáky; Jägermeister; 80
 Panáky; Jack Honey; 80
 Panáky; Bumbu; 150
-Pivo a nealko; Samson 10°; 50
+Pivo a nealko; Černá Hora; 50
 Pivo a nealko; Kofola; 50
 Pivo a nealko; Džus; 50
 Pivo a nealko; Tonik; 50
