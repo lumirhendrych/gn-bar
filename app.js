@@ -5,6 +5,7 @@ const VYCHOZI_CENIK = `Drinky 0,3 l; Křídla; 120
 Drinky 0,3 l; Vodka džus; 120
 Drinky 0,3 l; Vodka Sprite; 120
 Drinky 0,3 l; Morgan a cola; 120
+Drinky 0,3 l; Skinny Bitch; 120
 Drinky 0,3 l; Gin tonic; 140
 Panáky; Nicolaus vodka; 60
 Panáky; Božkov; 60
