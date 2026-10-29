@@ -56,7 +56,8 @@ function cti(k, def) {
   if (raw == null) return def;
   try { const v = JSON.parse(raw); return v == null ? def : v; }
   catch (e) {
-    try { localStorage.setItem(k + '.poskozene-' + Date.now(), raw); } catch (e2) {}
+    // kopii odložit jednou a poškozený klíč uvolnit, jinak by každé čtení (a každá další záložka) zakládalo novou kopii
+    try { localStorage.setItem(k + '.poskozene-' + Date.now(), raw); localStorage.removeItem(k); } catch (e2) {}
     setTimeout(() => info('Poškozená data v telefonu', 'Část uložených dat nešla přečíst; kopie je odložená v telefonu. Nemaž data prohlížeče a řekni to vedoucímu.'), 500);
     return def;
   }
@@ -347,7 +348,7 @@ function synchronizuj() {
   prekresli();
   if ($('#prehled').classList.contains('on')) vykresliPrehled();
 }
-window.addEventListener('storage', e => { if (!e.key || e.key.startsWith('gnbar.')) synchronizuj(); });
+window.addEventListener('storage', e => { if (!e.key || (e.key.startsWith('gnbar.') && !e.key.includes('.poskozene-'))) synchronizuj(); });
 window.addEventListener('pageshow', e => { if (e.persisted) synchronizuj(); });
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) return;
