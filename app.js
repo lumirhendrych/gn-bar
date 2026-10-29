@@ -55,7 +55,11 @@ function cti(k, def) {
   const raw = localStorage.getItem(k);
   if (raw == null) return def;
   try { const v = JSON.parse(raw); return v == null ? def : v; }
-  catch (e) { try { localStorage.setItem(k + '.poskozene-' + Date.now(), raw); } catch (e2) {} return def; }
+  catch (e) {
+    try { localStorage.setItem(k + '.poskozene-' + Date.now(), raw); } catch (e2) {}
+    setTimeout(() => info('Poškozená data v telefonu', 'Část uložených dat nešla přečíst; kopie je odložená v telefonu. Nemaž data prohlížeče a řekni to vedoucímu.'), 500);
+    return def;
+  }
 }
 function pis(k, v) {
   try { localStorage.setItem(k, JSON.stringify(v)); return true; }
@@ -64,17 +68,26 @@ function pis(k, v) {
 // účty se vždy znovu načtou a jen doplní podle id — jiná záložka tak nic nepřepíše ani nezdvojí
 function nactiProdeje() {
   const a = cti(K.prodeje, []);
-  return Array.isArray(a) ? a.map(p => p.id ? p : Object.assign(p, { id: 't' + p.t })) : [];
+  return Array.isArray(a) ? a.filter(p => p && typeof p === 'object' && Array.isArray(p.o)).map(p => p.id ? p : Object.assign(p, { id: 't' + p.t })) : [];
 }
 function pridejProdej(p) {
   const a = nactiProdeje();
-  if (!a.some(x => x.id === p.id)) a.push(p);
-  pis(K.prodeje, a); prodeje = a;
+  if (a.some(x => x.id === p.id)) { prodeje = a; return true; }
+  a.push(p);
+  if (!pis(K.prodeje, a)) return false;
+  prodeje = a; return true;
 }
 function upravProdej(id, fn) {
   const a = nactiProdeje(), p = a.find(x => x.id === id);
   if (p) { fn(p); pis(K.prodeje, a); }
   prodeje = a;
+}
+
+// čekající platba kartou; záznam ze staré verze kasy (bez seznamu pokusů) se zahodí
+function ctiCek() {
+  const c = cti(K.cekajici, null);
+  if (c && (!Array.isArray(c.ftx) || !Array.isArray(c.o))) { localStorage.removeItem(K.cekajici); return null; }
+  return c;
 }
 
 let nast = nactiNastaveni();
@@ -164,11 +177,16 @@ function prekresli() { vykresliMenu(); vykresliUcet(); }
 
 function zaznamenej(z, c, x) {
   x = x || {};
-  pridejProdej({ id: x.id || novyId(), t: Date.now(), t0: x.t0 || t0 || Date.now(), tk: x.tk || null, z, c,
+  const ok = pridejProdej({ id: x.id || novyId(), t: Date.now(), t0: x.t0 || t0 || Date.now(), tk: x.tk || null, z, c,
     dal: x.dal || null, tx: x.tx || null, ftx: x.ftx || null, zapis: x.zapis || '',
-    o: x.o || polozkyUctu(), b: nast.barman, bar: nast.bar || '' });
+    o: x.o || polozkyUctu(), ftxs: x.ftxs || null, b: nast.barman, bar: nast.bar || '' });
+  if (!ok) {  // nic nemazat, ať se účet ani čekající platba neztratí
+    info('Účet se neuložil', 'Telefon nemá kam ukládat. Účet zůstal otevřený — zapiš ho na papír a zavolej vedoucího.');
+    return false;
+  }
   vycistiUcet();
   if (z === 'karta') localStorage.removeItem(K.cekajici);  // až po zápisu účtu
+  return true;
 }
 
 // ---------- hotově ----------
@@ -186,7 +204,7 @@ $('#btnHotove').onclick = () => {
     };
     g.appendChild(b);
   }
-  $('#hOk').onclick = () => { $('#hOk').onclick = null; zavri(); zaznamenej('hotove', s, { dal }); toast('Hotově ' + kc(s) + ' ✓'); };
+  $('#hOk').onclick = () => { $('#hOk').onclick = null; zavri(); if (zaznamenej('hotove', s, { dal })) toast('Hotově ' + kc(s) + ' ✓'); };
   $('#dlgHotove').classList.add('on');
 };
 
@@ -220,6 +238,9 @@ function odkazTerminal(castka, ftx) {
 // každé otevření terminálu = nové foreign-tx-id (SumUp stejné ID podruhé odmítne)
 function otevriTerminal() {
   if (!platbaKartou) return;
+  const cek = ctiCek();
+  if (cek && cek.id !== platbaKartou.id) { platbaKartou = null; zavri(); synchronizuj(); return toast('Platba už je vyřízená v jiném okně'); }
+  if (cek) platbaKartou.ftx = cek.ftx;  // pokusy z jiné záložky nepřepsat
   const ftx = platbaKartou.id + '-' + (platbaKartou.ftx.length + 1);
   platbaKartou.ftx.push(ftx);
   pis(K.cekajici, platbaKartou);  // stránka se po návratu načte znovu, třeba v nové záložce
@@ -249,18 +270,22 @@ $('#btnKartou').onclick = () => {
 };
 $('#kOtevrit').onclick = otevriTerminal;
 $('#kAno').onclick = () => {
-  const cek = cti(K.cekajici, null);
+  const cek = ctiCek();
   if (!platbaKartou || !cek || cek.id !== platbaKartou.id) {
     platbaKartou = null; zavri(); synchronizuj();
     return toast('Platba už je vyřízená v jiném okně');
   }
   platbaKartou = null; zavri();
-  zaznamenej('karta', cek.castka, { id: cek.id, o: cek.o, t0: cek.t0, tk: cek.tk, ftx: cek.ftx[cek.ftx.length - 1], zapis: 'rucne' });
-  potvrzeni(cek.castka);
+  if (zaznamenej('karta', cek.castka, { id: cek.id, o: cek.o, t0: cek.t0, tk: cek.tk, ftx: cek.ftx[cek.ftx.length - 1], ftxs: cek.ftx, zapis: 'rucne' }))
+    potvrzeni(cek.castka);
 };
 $('#kNe').onclick = () => { zrusKartu(); toast('Platba neprošla — účet zůstal otevřený', true); };
 $('#kZpet').onclick = zrusKartu;
-function zrusKartu() { platbaKartou = null; localStorage.removeItem(K.cekajici); zavri(); }
+function zrusKartu() {
+  const cek = ctiCek();
+  if (platbaKartou && cek && cek.id === platbaKartou.id) localStorage.removeItem(K.cekajici);
+  platbaKartou = null; zavri();
+}
 
 // SumUp někdy přilepí parametry za další „?“ — sjednotit
 function parametry() {
@@ -270,7 +295,7 @@ function parametry() {
 // návrat ze SumUpu: ?sumup=1[&ok=1|0]&smp-status=success|failed|invalidstate&smp-tx-code=…&foreign-tx-id=…
 function navratZeSumUp() {
   const q = parametry();
-  const cek = cti(K.cekajici, null);
+  const cek = ctiCek();
   if (!q.has('sumup') && !q.has('smp-status')) { if (cek) ukazKartu(cek, true); return; }
   history.replaceState(null, '', location.pathname);
   const stav = q.get('smp-status') || (q.get('ok') === '1' ? 'success' : q.get('ok') === '0' ? 'failed' : '');
@@ -279,14 +304,18 @@ function navratZeSumUp() {
 
   if (stav === 'success') {
     if (patri) {
-      zaznamenej('karta', cek.castka, { id: cek.id, o: cek.o, t0: cek.t0, tk: cek.tk, ftx: ftx || cek.ftx[cek.ftx.length - 1], tx, zapis: 'auto' });
       platbaKartou = null;
-      return potvrzeni(cek.castka);
+      if (zaznamenej('karta', cek.castka, { id: cek.id, o: cek.o, t0: cek.t0, tk: cek.tk, ftx: ftx || cek.ftx[cek.ftx.length - 1], ftxs: cek.ftx, tx, zapis: 'auto' }))
+        potvrzeni(cek.castka);
+      return;
     }
     // už zapsáno (znovu načtená stránka, nebo ručně v jiném okně) → jen doplnit kód transakce
-    const uz = nactiProdeje().find(p => (tx && p.tx === tx) || (ftx && p.ftx === ftx));
-    if (uz) { if (!uz.tx && tx) upravProdej(uz.id, p => { p.tx = tx; }); return; }
-    const n = cti(K.nesparovane, []); (Array.isArray(n) ? n : []).push({ t: Date.now(), tx, ftx });
+    const uz = nactiProdeje().find(p => (tx && p.tx === tx) ||
+      (ftx && (p.ftx === ftx || (p.ftxs || []).includes(ftx) || ftx.startsWith(p.id + '-'))));
+    if (uz) { if (!uz.tx && tx) upravProdej(uz.id, p => { p.tx = tx; p.zapis = 'rucne+auto'; }); return; }
+    let n = cti(K.nesparovane, []); if (!Array.isArray(n)) n = [];
+    if (n.some(x => (tx && x.tx === tx) || (ftx && x.ftx === ftx))) return;  // stejný návrat podruhé
+    n.push({ t: Date.now(), tx, ftx });
     pis(K.nesparovane, n);
     return info('Platba kartou bez účtu',
       `SumUp hlásí zaplacenou platbu${tx ? ' (kód ' + tx + ')' : ''}, ale v kase k ní není otevřený účet. ` +
@@ -312,7 +341,7 @@ function navratZeSumUp() {
 function synchronizuj() {
   nast = nactiNastaveni(); nactiCenik(); hlavicka();
   prodeje = nactiProdeje();
-  const cek = cti(K.cekajici, null);
+  const cek = ctiCek();
   if (platbaKartou && (!cek || cek.id !== platbaKartou.id)) { platbaKartou = null; $('#dlgKarta').classList.remove('on'); }
   if (!platbaKartou) nactiUcet(cti(K.ucet, null));
   prekresli();
@@ -373,7 +402,8 @@ function vykresliPrehled() {
     const b = document.createElement('button'); b.textContent = p.storno ? '↺' : '✕';
     b.onclick = () => {
       if (!p.storno && !confirm(`Stornovat účet ${kc(p.c)}?` + (p.z === 'karta' ? '\nPeníze na kartu vrátí vedoucí v SumUpu.' : ''))) return;
-      upravProdej(p.id, x => { x.storno = !x.storno; x.st = x.storno ? Date.now() : null; });
+      const nove = !p.storno;
+      upravProdej(p.id, x => { x.storno = nove; x.st = nove ? Date.now() : null; });
       vykresliPrehled();
     };
     d.appendChild(b); u.appendChild(d);
@@ -382,7 +412,7 @@ function vykresliPrehled() {
 
 // ---------- export ----------
 const iso = t => t ? new Date(t).toISOString() : '';
-const sekundy = (a, b) => a && b ? Math.round((b - a) / 100) / 10 : '';
+const sekundy = (a, b) => a && b ? String(Math.round((b - a) / 100) / 10).replace('.', ',') : '';  // český Excel
 // apostrof před = + - @, ať Excel nespouští vzorce
 const bunka = x => { let s = String(x == null ? '' : x); if (/^[=+\-@]/.test(s)) s = "'" + s; return `"${s.replaceAll('"', '""')}"`; };
 const csv = rows => '﻿' + rows.map(r => r.map(bunka).join(';')).join('\n');
